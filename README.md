@@ -1,5 +1,5 @@
 <p align="center">
-<a href="https://rob-wiederstein.shinyapps.io/outliers_dash/><img src="./img/home_page.png" width=600/></a>
+<a href="https://rob-wiederstein.shinyapps.io/outliers_dash"/><img src="./img/home_page.png" width=600/></a>
 </p>
 
 ---
