@@ -1,0 +1,10 @@
+name: outliers_dash
+title:
+username: rob-wiederstein
+account: rob-wiederstein
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11568903
+bundleId: 8407680
+url: https://rob-wiederstein.shinyapps.io/outliers_dash/
+version: 1

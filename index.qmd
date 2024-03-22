@@ -1,0 +1,651 @@
+--- 
+title: "Outliers"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: 
+      version: 4
+      bootswatch: flatly
+runtime: shiny
+---
+
+```{r setup, include=F}
+library(ggplot2)
+library(ggExtra)
+library(dplyr)
+library(shiny)
+library(thematic)
+library(tidyr)
+library(colorspace)
+library(stray)
+library(shinyWidgets)
+library(plotly)
+library(DT)
+library(crosstalk)
+library(cassowaryr)
+#thematic::thematic_rmd(font = "auto")
+```
+
+
+
+# Distributions
+
+## Column {.sidebar data-width=250}
+
+### Inputs
+
+```{r ol-inputs}
+selectInput("variable",
+            label = "Variable:",
+            choices = list(
+                "univariate",
+                "bivariate"),
+            selected = "bivariate"
+)
+selectInput("distribution",
+            label = "Distribution:",
+            choices = list(
+                "normal",
+                "logarithmic"),
+            selected = "normal",
+            selectize = TRUE
+)
+selectInput("sample",
+            label = "Sample Size:",
+            choices = list(
+                "ten (10)" = 10,
+                "one hundred (100)" = 100,
+                "one thousand (1,000)" = 1000,
+                "ten thousand (10,000)" = 1e4),
+            selected = 100
+)
+sliderInput("mean",
+            label = "Origin:",
+            min = 0,
+            max = 100,
+            value = 0,
+            step = 25,
+            ticks = TRUE
+)
+sliderInput("sd",
+            label = "Sample Deviation:",
+            min = 1,
+            max = 10,
+            value = 1,
+            step = 1,
+            ticks = TRUE
+)
+selectInput("plot_type",
+            label = "Plot Type:",
+            choices = c("boxplot", "density", "densigram", "histogram", "violin"),
+            selected = "boxplot"
+)
+selectInput("centrality",
+            label = "Centrality Tests:",
+            choices = list("Standard Deviation" = "deviation",
+                           "Interquartile Range" = "iqr_range",
+                           "Percentile" = "percentile"),
+            selected = "deviation"
+)
+sliderInput("pct",
+            label = "Percentage:",
+            min = 1,
+            max = 10,
+            value = 5,
+            step = 1,
+            ticks = TRUE
+)
+sliderInput("outlier_multiple",
+            label = "Deviations from Center:",
+            min = 1,
+            max = 7,
+            value = 3,
+            step = .5,
+            ticks = TRUE
+)
+sliderInput("alpha",
+            label = "Transparency:",
+            min = .1,
+            max = 1,
+            step = .1,
+            value = .5,
+            ticks = TRUE)
+```
+
+## Column {data-width=1200}
+
+
+```{r ol-dataset}
+df <- reactive({
+    if(input$variable == "bivariate") {
+        if(input$distribution == "normal") {
+            df <- data.frame(x = rnorm(input$sample, mean = input$mean, sd = input$sd),
+                             y = rnorm(input$sample, mean = input$mean, sd = input$sd),
+                             x0 = 0,
+                             y0 = 0)
+        } else if (input$distribution == "logarithmic"){
+            df <- data.frame(x = rlnorm(input$sample, meanlog = input$mean, sdlog = input$sd),
+                             y = rlnorm(input$sample, meanlog = input$mean, sdlog = input$sd),
+                             x0 = 0,
+                             y0 = 0)
+        }
+    } else if (input$variable == "univariate") {
+        if(input$distribution == "normal"){
+            df <- data.frame(x = rnorm(input$sample, mean = input$mean, sd = input$sd),
+                         y = input$mean,
+                         x0 = input$mean,
+                         y0 = input$mean)
+        } else if (input$distribution == "logarithmic") {
+            df <- data.frame(x = rlnorm(input$sample, mean = input$mean, sdlog = input$sd),
+                             y = 0,
+                             x0 = 0,
+                             y0 = 0)
+        }
+    }
+    
+    df
+
+    df1 <-
+        df |>
+        mutate(d0 = sqrt((x - input$mean)^2 + (y - input$mean)^2)) |>
+        mutate(mean_d0 = mean(d0)) |> 
+        mutate(std_dev = sd(d0)) |>
+        mutate(iqr = IQR(d0)) |>
+        mutate(ptile_75th = across(d0, ~quantile(.x, probs=(.75)))) |> 
+        mutate(upper_bound = quantile(d0, probs = c((100 - input$pct)/100))) |> 
+        mutate(lower_bound = quantile(d0, probs = c((0 + input$pct)/100))) |> 
+        mutate(outliers = case_when(input$centrality  == "deviation" & (d0 > (input$outlier_multiple * std_dev) + mean_d0) ~ TRUE,
+                                    input$centrality == "iqr_range" & (d0 > (input$outlier_multiple * iqr) + ptile_75th) ~ TRUE,
+                                    input$centrality == "percentile" & (d0 > upper_bound) ~ TRUE,
+                                    .default = FALSE))
+    
+    df1
+})
+```
+
+
+### Outlier Results {data-height=100}
+
+```{r ol-results}
+renderTable({
+    if(all(df()$outliers == FALSE)){ 
+        data.frame(`Pct. Outliers` = "0")
+    } else {
+         tbl1 <-
+             df() |>
+            group_by(outliers) |>
+            count(outliers) |>
+            pivot_wider(names_from = outliers, values_from = n) |>
+            mutate(total = `FALSE` + `TRUE`) |>
+            mutate(pct_outliers = (`TRUE`/total) * 100) |>
+            rename(
+                "Typical" = `FALSE`,
+                "Outliers" = `TRUE`,
+                "Pct. Outliers" = `pct_outliers`
+            ) |>
+            select(!total)
+            tbl1
+    }
+})
+```
+
+
+
+
+### Scatter Plot
+
+```{r ol-plot}
+shiny::renderPlot({
+q2 <- colorspace::qualitative_hcl(2, palette = "Dark 3")
+
+p1 <-
+    df() |> 
+        ggplot() +
+        aes(x, y, group = outliers, color = outliers, alpha = input$alpha) +
+        geom_point() +
+        theme_minimal(16) +
+        theme(legend.position="none") +
+        theme(aspect.ratio=1) +
+        scale_color_manual(values = c("#E16A86", "#00AD9A"))
+ggMarginal(p1, type = input$plot_type, fill = '#CFCECD', size=8)
+})
+```
+
+
+### Table of Statistics {data-height=175}
+
+```{r ol-stats}
+renderTable({
+    keep_vars <- c("vars", "n", "mean", "sd", "median", "min", "max", "skew", "kurtosis")
+    if(input$variable == "univariate") {
+        psych::describe(df()["x"])[keep_vars]
+    } else if (input$variable == "bivariate"){
+        psych::describe(df()[c("x", "y")])[keep_vars]
+    }
+})
+
+```
+
+## Column
+
+### Top 25 Outliers {data-width=100}
+
+```{r}
+renderTable({
+    if(input$variable == "univariate") {
+        df() |> 
+            dplyr::filter(outliers == TRUE) |> 
+            select(x, d0) |> 
+            arrange(desc(d0)) |> 
+            slice_head(n = 25) |> 
+            rename("distance" = d0)|> 
+            mutate(ID = row_number(), .before = x)
+    } else if (input$variable == "bivariate") {
+        df() |> 
+            dplyr::filter(outliers == TRUE) |> 
+            select(x, y, d0) |> 
+            arrange(desc(d0)) |> 
+            slice_head(n = 25) |> 
+            rename("distance" = d0) |> 
+            mutate(id = row_number(), .before = x)
+    }
+})
+```
+
+# KNN
+
+## Column {.sidebar data-width=250}
+
+### Inputs
+
+```{r knn-inputs}
+selectInput("knn_dataset", 
+            label = "Dataset:",
+            choices = list(
+                Examples = list(
+                    one_cluster = "./data/data_a.rds",
+                    two_cluster = "./data/data_b.rds",
+                    microcluster = "./data/data_c.rds",
+                    `wheel #1` = "./data/data_d.rds",
+                    `wheel #2` = "./data/wheel.rds",
+                    `equidistant point` = "./data/data_e.rds",
+                    `easy outlier` = "./data/data_f.rds",
+                    moons = "./data/moons.rds"
+                    ),
+                DataSaurus = list(
+                    dino = "./data/dino.rds",
+                    high_lines = "./data/high_lines.rds",
+                    bullseye = "./data/bullseye.rds",
+                    star = "./data/star.rds"
+                    )
+                ),
+            selected = "./data/data_a.rds"
+)
+sliderInput("knn_alpha", label = "Outlier Cutoff (Default = .01):",
+            min = .01,
+            max = .1,
+            value = .01,
+            step = .005,
+            ticks = TRUE
+)
+sliderInput("knn_neighbors", label = "No. Neighbors: (Default = 10):",
+            min = 5,
+            max = 25,
+            value = 10,
+            step = 5,
+            ticks = TRUE
+)
+selectInput("knn_knnsearchtype", label = "KNN Search Type: (Default = 'brute')",
+            choices = list(
+                brute = "brute",
+                cover_tree = "cover_tree",
+                cr = "CR",
+                kd_tree = "kd_tree"
+            ),
+            selected = "brute"
+)
+selectInput("knn_normalize", label = "Normalize: (Default = 'unitize')",
+            choices = list(
+                Standardize = "standardize",
+                Unitize = "unitize"
+            ),
+            selected = "unitize"
+)
+sliderInput("knn_proportion", label = "Proportion: (Default = .5)",
+            min = 0,
+            max = 1,
+            value = .5,
+            step = .1,
+            ticks = TRUE
+)
+sliderInput("knn_threshold", 
+            label = "Threshold: (Default = 50)",
+            min = 1,
+            max = 25,
+            value = 25,
+            step = 1,
+            ticks = TRUE
+)
+```
+
+```{r knn-data}
+dataset <- reactive({
+        readRDS(input$knn_dataset) |>
+        na.omit()
+    })
+
+tally <- reactive({
+    output <-
+        find_HDoutliers(
+            data = dataset(),
+            alpha = input$knn_alpha,
+            k = input$knn_neighbors,
+            knnsearchtype = input$knn_knnsearchtype,
+            normalize = input$knn_normalize,
+            p = input$knn_proportion,
+            tn = input$knn_threshold
+        )
+
+    df <- data.frame(type = output$type) |>
+        dplyr::mutate(type = as.character(type)) |>
+        dplyr::group_by(type) |>
+        dplyr::count(type)  |>
+        tidyr::pivot_wider(names_from = type, values_from = n)
+
+    template <- data.frame(typical = as.numeric(),
+                           outlier = as.numeric(),
+                           pct_outlier = as.numeric())
+    
+    df1 <-
+    template |>
+    dplyr::bind_rows(df) |>
+    mutate(across(typical:pct_outlier, ~if_else(is.na(.x), 0, .x))) |>
+    mutate(pct_outlier = (outlier/(typical + outlier)) * 100) |>
+    rename("Typical" = typical,
+           "Outliers" = outlier,
+           "Pct. Outliers" = pct_outlier)
+    df1
+})
+```
+
+## Column {data-width=1200}
+
+### Outlier Results {data-height=100}
+
+```{r }
+renderTable({
+    tally()
+})
+```
+
+### knn Scatter Plot
+
+```{r knn-scatter-plot}
+renderPlot({
+        output <-
+            find_HDoutliers(
+            data = dataset(),
+            alpha = input$knn_alpha,
+            k = input$knn_neighbors,
+            knnsearchtype = input$knn_knnsearchtype,
+            normalize = input$knn_normalize,
+            p = input$knn_proportion,
+            tn = input$knn_threshold
+        )
+        df <- dplyr::bind_cols(dataset(), output)
+        q2 <- qualitative_hcl(2, palette = "Dark 3")
+        p1 <-
+            df|> 
+            ggplot() +
+            aes(x, y, group = type, color = type) +
+            geom_point(alpha = .75) +
+            theme_minimal(16) +
+            theme(legend.position="none") +
+            theme(aspect.ratio=1) +
+            scale_color_manual(values = c( "#00AD9A", "#E16A86"))
+        ggMarginal(p1, type = "boxplot", fill = '#CFCECD', size=8)
+    })
+```
+
+
+### Table of Statistics {data-height=175}
+
+```{r st-stats}
+renderTable({
+        keep_vars <- c("vars", "n", "mean", "sd", "median", "min", "max", "skew", "kurtosis")
+        psych::describe(dataset())[keep_vars]
+})
+
+```
+
+## Column
+
+### Top 25 knn Outlier
+
+```{r str-top-25}
+renderTable({
+    output <-
+            find_HDoutliers(
+            data = dataset(),
+            alpha = input$knn_alpha,
+            k = input$knn_neighbors,
+            knnsearchtype = input$knn_knnsearchtype,
+            normalize = input$knn_normalize,
+            p = input$knn_proportion,
+            tn = input$knn_threshold
+        )
+
+    df <- data.frame(out_scores = output$out_scores,
+                 x = dataset()[, "x"],
+                 y = dataset()[, "y"],
+                 type = output$type)
+df1 <-
+    df |>
+    dplyr::filter(type == "outlier") |>
+    select(x, y, out_scores) |>
+    arrange(out_scores) |>
+    arrange(desc(out_scores)) |> 
+    mutate(ID = row_number(), .before = x) |>
+    slice_head(n = 25) |>
+    rename("distance" = out_scores)
+df1
+})
+```
+
+# Claims
+
+```{r mdcr-claims-data}
+mdcr_claims <- readRDS(file = "./data/2021_mdcr_urban_clms.rds")
+```
+
+
+## Column {.sidebar data-width=250}
+
+### Inputs
+
+```{r mdcr-claim-inputs}
+selectInput("mdcr_specialty", 
+            label = "Specialty:",
+            choices = sort(unique(mdcr_claims$rndrng_prvdr_type)),
+            selected = "Hospitalist",
+            multiple = FALSE
+            
+)
+pickerInput(
+  inputId = "mdcr_cities", 
+  label = "Cities:", 
+  choices = sort(unique(mdcr_claims$rndrng_prvdr_city)), 
+  options = pickerOptions(
+    actionsBox = TRUE, 
+    size = 10
+  ), 
+  selected = sort(unique(mdcr_claims$rndrng_prvdr_city)),
+  multiple = TRUE
+)
+radioButtons("axis_scale", "Axis Scale:",
+               c("Log 10" = "log10",
+                 "Regular" = "regular")
+)
+
+```
+
+## Column {data-width=1200}
+
+```{r mdcr-claims-reactive}
+claims <- reactive({
+    mdcr_claims |> 
+        dplyr::filter(rndrng_prvdr_type == input$mdcr_specialty) |> 
+        dplyr::filter(rndrng_prvdr_city %in% input$mdcr_cities)
+})
+```
+
+### Outlier Results {data-height=100}
+
+```{r mdcr-claim-output}
+renderTable({
+    claims() |> 
+        group_by(type) |> 
+        summarize(n = n()) |> 
+        tidyr::pivot_wider(names_from = type, values_from = n) |> 
+        mutate(pct_outlier = (round(outlier/typical, 3)) * 100) |> 
+        rename("Typical" = typical,
+               "Outlier" = outlier,
+               "Pct. Outlier" = pct_outlier)
+})
+```
+
+
+### Medicare Claims Scatter 
+
+```{r mdcr-claims-scatter}
+renderPlot({
+    if(input$axis_scale == "log10"){
+    q2 <- colorspace::qualitative_hcl(2, palette = "Dark 3")
+    claims() |>
+        ggplot() +
+        aes(tot_benes_mean, tot_srvcs_mean, group = type, color = type) +
+        geom_point(alpha = .5) +
+        scale_x_log10() +
+        scale_y_log10() +
+        theme_minimal() +
+        labs(title = unique(claims()$rndrng_prvdr_type)) +
+        scale_color_manual(values = c("#E16A86", "#00AD9A")) +
+        facet_wrap(vars(claims()$rndrng_prvdr_city)) +
+            theme(legend.position = "none")
+    } else {
+        q2 <- colorspace::qualitative_hcl(2, palette = "Dark 3")
+        claims() |>
+            ggplot() +
+            aes(tot_benes_mean, tot_srvcs_mean, group = type, color = type) +
+            geom_point(alpha = .5) +
+            scale_x_continuous() +
+            scale_y_continuous() +
+            theme_minimal() +
+            labs(title = unique(claims()$rndrng_prvdr_type)) +
+            scale_color_manual(values = c("#E16A86", "#00AD9A")) +
+            facet_wrap(vars(claims()$rndrng_prvdr_city)) +
+            theme(legend.position = "none")
+    }
+
+})
+```
+
+### Table of Statistics {data-height=175}
+
+```{r mdcr-claims-tbl}
+renderTable({
+    keep_vars <- c("vars", "n", "mean", "sd", "median", "min", "max", "skew", "kurtosis")
+    psych::describe(claims()[, c("tot_benes_mean", "tot_srvcs_mean")])[keep_vars]
+})
+```
+
+## Column 
+
+### Top 25 Outliers
+
+```{r mdcr-claims-outlier}
+renderTable({
+    claims() |> 
+        dplyr::filter(type == "outlier") |>
+        select(rndrng_prvdr_last_org_name, rndrng_prvdr_city, out_scores) |>
+        arrange(desc(out_scores)) |>
+        slice_head(n = 25) |>
+        mutate(ID = row_number(), .before = rndrng_prvdr_last_org_name) |>
+        rename("Name" = rndrng_prvdr_last_org_name,
+               "City" = rndrng_prvdr_city,
+               "Score" = out_scores)
+})
+```
+
+# Scagnostics
+
+```{r sc-load-data}
+scag <- readRDS("./data/2021_mdcr_urban_scags.rds")
+```
+
+## Column {.tabset}
+
+### Scatter Plot {data-height=800}
+
+```{r sc-scatter-plot}
+renderPlot({
+    p <- 
+        scag |> 
+        ggplot() +
+        aes(PC1, PC2, color = type, text = grouping) +
+        geom_point(alpha = .65, size = 2.75) +
+        scale_colour_manual(name = "Type", values = c("outlier" = "#00AD9A", "typical" = "#E16A86")) +
+        theme_minimal() +
+        theme(legend.position = "none")
+        labs()
+    p
+})
+
+```
+
+### Table
+
+```{r sc-data-table}
+renderTable({
+    scag
+})
+```
+
+
+## Column {data-width=400}
+
+### Top 25 Outliers 
+
+```{r sc-top-outliers}
+renderTable({
+    sc_tbl <-
+        scag |> 
+        select(grouping, type, out_scores) |> 
+        arrange(desc(out_scores)) |> 
+        mutate(ID = row_number(), .before = grouping) |> 
+        slice_head(n = 25)
+    sc_tbl
+    
+})
+```
+
+
+### Outlier Score Distribution
+
+```{r mtcars-histogram}
+scag |> 
+    ggplot() +
+    aes(out_scores) +
+    geom_histogram() +
+    theme_minimal() +
+    theme(text = element_text(size = 18))
+```
+
+
+
+
+
+
+
+
+
+
