@@ -24,12 +24,15 @@ Don't forget to give the project a star! Thanks again!
 
 ## License
 
-Distributed under the MIT License. See [`LICENSE.txt`]("./license.md") for more information.
+Distributed under the MIT License. See [`LICENSE.md`]("https://github.com/RobWiederstein/outliers_dash/blob/main/LICENSE.md") for more information.
 
 
 ## Acknowledgements
 
 - Professor Talagala whose academic paper and numerous repositories have been extremely helpful and form the basis of this dashboard.
 
-- Centers for Medicare and Medicaid Services for the publically available claims data.
+- Centers for Medicare and Medicaid Services for the publicly available claims data.
 
+## Contact
+
+Rob Wiederstein - [Linked In](https://www.linkedin.com/in/rob-wiederstein-797553138/)
