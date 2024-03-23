@@ -67,7 +67,7 @@ sliderInput("mean",
             ticks = TRUE
 )
 sliderInput("sd",
-            label = "Sample Deviation:",
+            label = "Spread:",
             min = 1,
             max = 10,
             value = 1,
@@ -102,13 +102,6 @@ sliderInput("outlier_multiple",
             step = .5,
             ticks = TRUE
 )
-sliderInput("alpha",
-            label = "Transparency:",
-            min = .1,
-            max = 1,
-            step = .1,
-            value = .5,
-            ticks = TRUE)
 ```
 
 ## Column {data-width=1200}
@@ -200,7 +193,7 @@ q2 <- colorspace::qualitative_hcl(2, palette = "Dark 3")
 p1 <-
     df() |> 
         ggplot() +
-        aes(x, y, group = outliers, color = outliers, alpha = input$alpha) +
+        aes(x, y, group = outliers, color = outliers, alpha = .65) +
         geom_point() +
         theme_minimal(16) +
         theme(legend.position="none") +
@@ -288,10 +281,10 @@ sliderInput("knn_alpha", label = "Outlier Cutoff (Default = .01):",
             ticks = TRUE
 )
 sliderInput("knn_neighbors", label = "No. Neighbors: (Default = 10):",
-            min = 5,
-            max = 25,
+            min = 1,
+            max = 20,
             value = 10,
-            step = 5,
+            step = 1,
             ticks = TRUE
 )
 selectInput("knn_knnsearchtype", label = "KNN Search Type: (Default = 'brute')",
